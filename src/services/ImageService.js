@@ -100,8 +100,11 @@ class ImageService {
             }
 
             // Handle image formats
-            console.log(`Converting to ${format} format with quality ${quality}`);
-            return await this.convertToFormat(processedBuffer, format, quality, maxSizeKB);
+            console.log(`Converting to ${format} format [Preview: ${isPreview}]`);
+            const targetQuality = isPreview ? 60 : quality;
+            const targetSizeLimit = isPreview ? null : maxSizeKB;
+
+            return await this.convertToFormat(processedBuffer, format, targetQuality, targetSizeLimit);
 
         } catch (error) {
             console.error('ImageService error:', error);
