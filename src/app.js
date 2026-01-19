@@ -14,7 +14,7 @@ app.use(helmet({
 
 // CORS Configuration
 const allowedOrigins = [
-    process.env.CORS_ORIGIN,
+    'https://image-resize-backend.vercel.app',
     'http://localhost:5173',
     'http://localhost:4173',
     'http://localhost:3000'
