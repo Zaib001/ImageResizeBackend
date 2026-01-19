@@ -30,7 +30,7 @@ class ImageController {
                 return res.status(400).json({ error: 'Width and height are required.' });
             }
 
-            const outputBuffer = await ImageService.processImage(inputBuffer, options);
+            const outputBuffer = await ImageService.processImage(input, options);
 
             const mimeType = this.getMimeType(options.format);
             const ext = options.format.toLowerCase() === 'pdf' ? 'pdf' : options.format.toLowerCase();
@@ -49,10 +49,11 @@ class ImageController {
             res.send(outputBuffer);
 
         } catch (err) {
-            const status = err.status || 400;
+            const status = err.status || 500;
             res.status(status).json({
                 error: err.message || 'Image processing failed',
-                code: err.code || 'PROCESSING_ERROR'
+                stack: process.env.NODE_ENV === 'production' ? err.message : err.stack,
+                code: err.code || 'INTERNAL_ERROR'
             });
         }
     }
