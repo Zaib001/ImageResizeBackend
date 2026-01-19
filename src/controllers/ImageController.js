@@ -23,7 +23,8 @@ class ImageController {
                 format: req.body.format || 'jpeg',
                 backgroundColor: req.body.backgroundColor || '#FFFFFF',
                 maxSizeKB: req.body.maxSizeKB ? Number(req.body.maxSizeKB) : null,
-                quality: req.body.quality ? Number(req.body.quality) : 90
+                quality: req.body.quality ? Number(req.body.quality) : 90,
+                isPreview: req.body.isPreview === 'true'
             };
 
             if (!options.width || !options.height) {

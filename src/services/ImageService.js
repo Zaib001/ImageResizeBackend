@@ -13,11 +13,22 @@ class ImageService {
             format = 'jpeg',
             backgroundColor = '#FFFFFF',
             maxSizeKB = null,
-            quality = 90
+            quality = 90,
+            isPreview = false
         } = options;
 
-        const targetWidth = UnitConverter.toPixels(width, unit);
-        const targetHeight = UnitConverter.toPixels(height, unit);
+        let targetWidth = UnitConverter.toPixels(width, unit);
+        let targetHeight = UnitConverter.toPixels(height, unit);
+
+        // Optimization: For previews, cap the resolution to save CPU/Bandwidth
+        if (isPreview) {
+            const maxPreviewDim = 1200;
+            if (targetWidth > maxPreviewDim || targetHeight > maxPreviewDim) {
+                const ratio = Math.min(maxPreviewDim / targetWidth, maxPreviewDim / targetHeight);
+                targetWidth = Math.round(targetWidth * ratio);
+                targetHeight = Math.round(targetHeight * ratio);
+            }
+        }
 
         UnitConverter.validateDimensions(targetWidth, targetHeight);
 
@@ -27,7 +38,8 @@ class ImageService {
             return await this.generatePDF(processedBuffer, targetWidth, targetHeight, maxSizeKB, quality);
         }
 
-        return await this.optimizeOutput(processedBuffer, format, maxSizeKB, quality);
+        // Optimization: For previews, skip iterative compression and use lower quality
+        return await this.optimizeOutput(processedBuffer, format, isPreview ? null : maxSizeKB, isPreview ? 60 : quality);
     }
 
     async applyResize(input, width, height, mode, backgroundColor) {
