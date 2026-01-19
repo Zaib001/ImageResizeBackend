@@ -98,6 +98,16 @@ class ImageService {
                         .toBuffer();
                     break;
 
+                case 'color':
+                    processedBuffer = await sharp(inputBuffer)
+                        .resize(finalWidth, finalHeight, {
+                            fit: 'contain',
+                            background: backgroundColor
+                        })
+                        .flatten({ background: backgroundColor })
+                        .toBuffer();
+                    break;
+
                 default:
                     throw new Error(`Unsupported resize mode: ${mode}`);
             }
