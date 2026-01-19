@@ -4,16 +4,7 @@ const multer = require('multer');
 const ImageController = require('../controllers/ImageController');
 const TempFileManager = require('../utils/TempFileManager');
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, TempFileManager.baseDir);
-    },
-    filename: (req, file, cb) => {
-        const ext = '.' + file.originalname.split('.').pop();
-        const filename = TempFileManager.generatePath(ext).split(/[\\/]/).pop();
-        cb(null, filename);
-    }
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage: storage,

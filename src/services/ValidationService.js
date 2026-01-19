@@ -1,9 +1,9 @@
 const sharp = require('sharp');
 
 class ValidationService {
-    async validateImage(filePath) {
+    async validateImage(input) {
         try {
-            const metadata = await sharp(filePath).metadata();
+            const metadata = await sharp(input).metadata();
             const allowedFormats = ['jpeg', 'jpg', 'png', 'webp'];
 
             if (!allowedFormats.includes(metadata.format)) {

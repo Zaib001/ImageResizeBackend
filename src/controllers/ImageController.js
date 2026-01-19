@@ -11,10 +11,9 @@ class ImageController {
                 return res.status(400).json({ error: 'No image file uploaded.' });
             }
 
-            inputPath = req.file.path;
-            TempFileManager.registerCleanup(res, inputPath);
+            const input = req.file.buffer;
 
-            await ValidationService.validateImage(inputPath);
+            await ValidationService.validateImage(input);
             ValidationService.validateSize(req.file.size);
 
             const options = {
@@ -32,7 +31,7 @@ class ImageController {
                 return res.status(400).json({ error: 'Width and height are required.' });
             }
 
-            const outputBuffer = await ImageService.processImage(inputPath, options);
+            const outputBuffer = await ImageService.processImage(inputBuffer, options);
 
             const mimeType = this.getMimeType(options.format);
             const ext = options.format.toLowerCase() === 'pdf' ? 'pdf' : options.format.toLowerCase();

@@ -4,7 +4,7 @@ const fs = require('fs-extra');
 const UnitConverter = require('../utils/UnitConverter');
 
 class ImageService {
-    async processImage(inputPath, options) {
+    async processImage(input, options) {
         const {
             width,
             height,
@@ -21,7 +21,7 @@ class ImageService {
 
         UnitConverter.validateDimensions(targetWidth, targetHeight);
 
-        let processedBuffer = await this.applyResize(inputPath, targetWidth, targetHeight, mode, backgroundColor);
+        let processedBuffer = await this.applyResize(input, targetWidth, targetHeight, mode, backgroundColor);
 
         if (format.toLowerCase() === 'pdf') {
             return await this.generatePDF(processedBuffer, targetWidth, targetHeight, maxSizeKB, quality);
@@ -30,8 +30,8 @@ class ImageService {
         return await this.optimizeOutput(processedBuffer, format, maxSizeKB, quality);
     }
 
-    async applyResize(inputPath, width, height, mode, backgroundColor) {
-        const image = sharp(inputPath);
+    async applyResize(input, width, height, mode, backgroundColor) {
+        const image = sharp(input);
 
         if (mode === 'stretch') {
             return await image

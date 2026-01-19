@@ -15,19 +15,15 @@ app.use(helmet({
 const allowedOrigins = [
     process.env.CORS_ORIGIN,
     'http://localhost:5173',
-    'http://localhost:4173'
+    'http://localhost:4173',
+    'http://localhost:3000'
 ].filter(Boolean);
 
 app.use(cors({
-    origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Cross-Origin Request Blocked by Security Policy'));
-        }
-    },
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true,
+    exposedHeaders: ['Content-Disposition']
 }));
 
 app.use(express.json());
