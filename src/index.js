@@ -1,4 +1,5 @@
-﻿const app = require('./app');
+﻿// server.js (or index.js)
+const app = require('./app');
 
 // Export for Vercel
 module.exports = app;
