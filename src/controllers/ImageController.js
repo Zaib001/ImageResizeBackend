@@ -3,8 +3,6 @@ const ValidationService = require('../services/ValidationService');
 
 class ImageController {
     async process(req, res) {
-        let inputPath = null;
-
         try {
             if (!req.file) {
                 return res.status(400).json({ error: 'No image file uploaded.' });
