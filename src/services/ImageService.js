@@ -1,11 +1,10 @@
-// services/ImageService.js
+// src/services/ImageService.js
 const sharp = require('sharp');
 const { PDFDocument } = require('pdf-lib');
+const UnitConverter = require('../utils/UnitConverter');
 
 class ImageService {
-    async processImage(input, options) {
-        console.log('ImageService.processImage called with options:', options);
-
+    async processImage(inputBuffer, options) {
         const {
             width,
             height,
@@ -19,56 +18,70 @@ class ImageService {
         } = options;
 
         try {
-            // Convert units if needed
-            let targetWidth = width;
-            let targetHeight = height;
+            console.log('Processing image with options:', {
+                width,
+                height,
+                unit,
+                mode,
+                format,
+                isPreview
+            });
 
-            if (unit === 'in') {
-                targetWidth = Math.round(width * 96); // 96 DPI
-                targetHeight = Math.round(height * 96);
-            } else if (unit === 'cm') {
-                targetWidth = Math.round(width * 37.8); // 37.8 pixels per cm
-                targetHeight = Math.round(height * 37.8);
-            } else if (unit === 'mm') {
-                targetWidth = Math.round(width * 3.78); // 3.78 pixels per mm
-                targetHeight = Math.round(height * 3.78);
-            }
+            // Convert units to pixels using your UnitConverter
+            const targetWidth = UnitConverter.toPixels(width, unit);
+            const targetHeight = UnitConverter.toPixels(height, unit);
 
-            // Validate dimensions
-            if (targetWidth <= 0 || targetHeight <= 0) {
-                throw new Error('Width and height must be positive numbers');
-            }
+            console.log(`Converted dimensions: ${width}${unit} x ${height}${unit} -> ${targetWidth}px x ${targetHeight}px`);
 
-            if (targetWidth > 10000 || targetHeight > 10000) {
-                throw new Error('Maximum dimensions exceeded (10000px)');
-            }
+            // Validate dimensions using your UnitConverter
+            UnitConverter.validateDimensions(targetWidth, targetHeight);
 
-            // For previews, limit size
+            // For previews, limit dimensions
+            let finalWidth = targetWidth;
+            let finalHeight = targetHeight;
+
             if (isPreview) {
-                const maxPreviewDim = 1200;
-                if (targetWidth > maxPreviewDim || targetHeight > maxPreviewDim) {
-                    const ratio = Math.min(maxPreviewDim / targetWidth, maxPreviewDim / targetHeight);
-                    targetWidth = Math.round(targetWidth * ratio);
-                    targetHeight = Math.round(targetHeight * ratio);
+                const MAX_PREVIEW_DIM = 1200;
+                if (targetWidth > MAX_PREVIEW_DIM || targetHeight > MAX_PREVIEW_DIM) {
+                    const ratio = Math.min(MAX_PREVIEW_DIM / targetWidth, MAX_PREVIEW_DIM / targetHeight);
+                    finalWidth = Math.round(targetWidth * ratio);
+                    finalHeight = Math.round(targetHeight * ratio);
+                    console.log(`Preview scaled down to: ${finalWidth}px x ${finalHeight}px`);
                 }
             }
 
-            console.log('Target dimensions:', { targetWidth, targetHeight });
+            console.log(`Final dimensions: ${finalWidth}px x ${finalHeight}px`);
 
             // Process based on mode
             let processedBuffer;
-            const image = sharp(input);
+            const image = sharp(inputBuffer);
 
-            switch (mode) {
+            switch (mode.toLowerCase()) {
                 case 'stretch':
+                case 'fill':
                     processedBuffer = await image
-                        .resize(targetWidth, targetHeight, { fit: 'fill' })
+                        .resize(finalWidth, finalHeight, { fit: 'fill' })
+                        .toBuffer();
+                    break;
+
+                case 'contain':
+                    processedBuffer = await image
+                        .resize(finalWidth, finalHeight, {
+                            fit: 'contain',
+                            background: backgroundColor
+                        })
+                        .toBuffer();
+                    break;
+
+                case 'cover':
+                    processedBuffer = await image
+                        .resize(finalWidth, finalHeight, { fit: 'cover' })
                         .toBuffer();
                     break;
 
                 case 'color':
                     processedBuffer = await image
-                        .resize(targetWidth, targetHeight, {
+                        .resize(finalWidth, finalHeight, {
                             fit: 'contain',
                             background: backgroundColor
                         })
@@ -76,67 +89,82 @@ class ImageService {
                         .toBuffer();
                     break;
 
-                default: // 'contain' or any other
-                    processedBuffer = await image
-                        .resize(targetWidth, targetHeight, { fit: 'contain' })
-                        .toBuffer();
-                    break;
+                default:
+                    throw new Error(`Unsupported resize mode: ${mode}`);
             }
 
             // Handle PDF format
             if (format.toLowerCase() === 'pdf') {
-                return await this.generatePDF(processedBuffer, targetWidth, targetHeight);
+                console.log('Converting to PDF format');
+                return await this.convertToPDF(processedBuffer, finalWidth, finalHeight);
             }
 
             // Handle image formats
+            console.log(`Converting to ${format} format with quality ${quality}`);
             return await this.convertToFormat(processedBuffer, format, quality, maxSizeKB);
 
         } catch (error) {
             console.error('ImageService error:', error);
-            throw new Error(`Image processing failed: ${error.message}`);
+            throw new Error(`Failed to process image: ${error.message}`);
         }
     }
 
     async convertToFormat(buffer, format, quality, maxSizeKB) {
         const formatLower = format.toLowerCase();
-        let outputBuffer = buffer;
+        const sharpFormat = formatLower === 'jpg' ? 'jpeg' : formatLower;
 
-        // For simple conversion without size optimization
+        console.log(`Format conversion: ${sharpFormat}, quality: ${quality}, maxSizeKB: ${maxSizeKB}`);
+
+        // If no size limit, just convert
         if (!maxSizeKB) {
-            const sharpFormat = formatLower === 'jpg' ? 'jpeg' : formatLower;
-            return await sharp(buffer)
-                .toFormat(sharpFormat, { quality })
+            const result = await sharp(buffer)
+                .toFormat(sharpFormat, {
+                    quality: Math.min(Math.max(quality, 1), 100)
+                })
                 .toBuffer();
+            console.log(`Converted without size limit: ${result.length} bytes`);
+            return result;
         }
 
         // With size optimization
-        let currentQuality = quality;
         const targetBytes = maxSizeKB * 1024;
+        let currentQuality = Math.min(Math.max(quality, 1), 100);
+        let outputBuffer;
+        let attempts = 0;
 
-        for (let i = 0; i < 5; i++) {
-            const sharpFormat = formatLower === 'jpg' ? 'jpeg' : formatLower;
+        console.log(`Target size: ${targetBytes} bytes, starting quality: ${currentQuality}`);
+
+        while (attempts < 5) {
             outputBuffer = await sharp(buffer)
                 .toFormat(sharpFormat, { quality: currentQuality })
                 .toBuffer();
 
-            if (outputBuffer.length <= targetBytes) {
+            console.log(`Attempt ${attempts + 1}: quality ${currentQuality}, size ${outputBuffer.length} bytes`);
+
+            if (outputBuffer.length <= targetBytes || currentQuality <= 10) {
+                console.log(`Final quality: ${currentQuality}, final size: ${outputBuffer.length} bytes`);
                 return outputBuffer;
             }
 
-            currentQuality = Math.max(10, currentQuality - 20);
+            currentQuality = Math.max(10, currentQuality - 15);
+            attempts++;
         }
 
+        console.log(`Using lowest quality (10), size: ${outputBuffer.length} bytes`);
         return outputBuffer;
     }
 
-    async generatePDF(imageBuffer, width, height) {
+    async convertToPDF(imageBuffer, width, height) {
         try {
+            console.log('Creating PDF document');
+
             // Convert image to JPEG for PDF embedding
             const jpegBuffer = await sharp(imageBuffer)
                 .jpeg({ quality: 90 })
                 .toBuffer();
 
-            // Create PDF
+            console.log(`JPEG for PDF: ${jpegBuffer.length} bytes`);
+
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage([width, height]);
             const embeddedImage = await pdfDoc.embedJpg(jpegBuffer);
@@ -149,10 +177,13 @@ class ImageService {
             });
 
             const pdfBytes = await pdfDoc.save();
-            return Buffer.from(pdfBytes);
+            const pdfBuffer = Buffer.from(pdfBytes);
+
+            console.log(`PDF created: ${pdfBuffer.length} bytes`);
+            return pdfBuffer;
         } catch (error) {
-            console.error('PDF generation error:', error);
-            throw new Error(`PDF generation failed: ${error.message}`);
+            console.error('PDF conversion error:', error);
+            throw new Error(`Failed to create PDF: ${error.message}`);
         }
     }
 }

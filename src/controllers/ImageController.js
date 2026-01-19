@@ -1,104 +1,178 @@
-// controllers/ImageController.js
+// src/controllers/ImageController.js
 const ImageService = require('../services/ImageService');
 const ValidationService = require('../services/ValidationService');
+const UnitConverter = require('../utils/UnitConverter');
 
 class ImageController {
     async process(req, res) {
-        console.log('Processing request...');
+        const startTime = Date.now();
 
         try {
-            // Log request info for debugging
-            console.log('Headers:', req.headers);
-            console.log('Body keys:', Object.keys(req.body));
-            console.log('File exists:', !!req.file);
+            console.log('Processing request from origin:', req.headers.origin);
 
+            // Check if file exists
             if (!req.file) {
                 console.error('No file uploaded');
                 return res.status(400).json({
-                    error: 'No image file uploaded. Please select an image.'
+                    error: 'No image file provided. Please upload an image.',
+                    code: 'NO_FILE'
                 });
             }
 
             console.log('File received:', {
-                originalname: req.file.originalname,
+                name: req.file.originalname,
                 size: req.file.size,
                 mimetype: req.file.mimetype
             });
 
-            // Validate image
+            // Validate the uploaded file
             console.log('Validating image...');
             await ValidationService.validateImage(req.file.buffer);
             ValidationService.validateSize(req.file.size);
 
-            // Parse options with defaults
+            // Parse and validate request parameters
             const options = {
-                width: req.body.width ? Number(req.body.width) : null,
-                height: req.body.height ? Number(req.body.height) : null,
-                unit: req.body.unit || 'px',
-                mode: req.body.mode || 'stretch',
-                format: req.body.format || 'jpeg',
+                width: parseFloat(req.body.width),
+                height: parseFloat(req.body.height),
+                unit: (req.body.unit || 'px').toLowerCase(),
+                mode: (req.body.mode || 'stretch').toLowerCase(),
+                format: (req.body.format || 'jpeg').toLowerCase(),
                 backgroundColor: req.body.backgroundColor || '#FFFFFF',
-                maxSizeKB: req.body.maxSizeKB ? Number(req.body.maxSizeKB) : null,
-                quality: req.body.quality ? Number(req.body.quality) : 90,
+                quality: parseInt(req.body.quality, 10) || 90,
+                maxSizeKB: req.body.maxSizeKB ? parseFloat(req.body.maxSizeKB) : null,
                 isPreview: req.body.isPreview === 'true'
             };
 
-            console.log('Processing options:', options);
+            console.log('Parsed options:', options);
 
             // Validate required parameters
-            if (!options.width || !options.height) {
+            if (!options.width || !options.height ||
+                isNaN(options.width) || isNaN(options.height) ||
+                options.width <= 0 || options.height <= 0) {
                 return res.status(400).json({
-                    error: 'Width and height are required.'
+                    error: 'Valid width and height parameters are required.',
+                    code: 'INVALID_DIMENSIONS'
                 });
             }
 
-            // Process image
-            console.log('Starting image processing...');
-            const outputBuffer = await ImageService.processImage(req.file.buffer, options);
-            console.log('Image processed successfully, buffer size:', outputBuffer.length);
+            // Validate unit
+            const validUnits = ['px', 'pixel', 'pixels', 'in', 'inch', 'inches', 'cm', 'centimeter', 'centimeters', 'mm', 'millimeter', 'millimeters'];
+            if (!validUnits.includes(options.unit)) {
+                return res.status(400).json({
+                    error: `Invalid unit: ${options.unit}. Supported units: px, in, cm, mm`,
+                    code: 'INVALID_UNIT'
+                });
+            }
 
-            // Determine MIME type
-            const mimeType = this.getMimeType(options.format);
-            const ext = options.format.toLowerCase() === 'pdf' ? 'pdf' : options.format.toLowerCase();
-            const filename = `processed-${Date.now()}.${ext}`;
+            // Validate mode
+            const validModes = ['stretch', 'fill', 'contain', 'cover', 'color'];
+            if (!validModes.includes(options.mode)) {
+                return res.status(400).json({
+                    error: `Invalid mode: ${options.mode}. Supported modes: ${validModes.join(', ')}`,
+                    code: 'INVALID_MODE'
+                });
+            }
+
+            // Validate format
+            const validFormats = ['jpeg', 'jpg', 'png', 'webp', 'pdf'];
+            if (!validFormats.includes(options.format)) {
+                return res.status(400).json({
+                    error: `Invalid format: ${options.format}. Supported formats: ${validFormats.join(', ')}`,
+                    code: 'INVALID_FORMAT'
+                });
+            }
+
+            // Validate quality
+            if (options.quality < 1 || options.quality > 100) {
+                return res.status(400).json({
+                    error: 'Quality must be between 1 and 100',
+                    code: 'INVALID_QUALITY'
+                });
+            }
+
+            // Convert to pixels to check dimensions
+            try {
+                const pixelWidth = UnitConverter.toPixels(options.width, options.unit);
+                const pixelHeight = UnitConverter.toPixels(options.height, options.unit);
+                UnitConverter.validateDimensions(pixelWidth, pixelHeight);
+            } catch (dimError) {
+                return res.status(400).json({
+                    error: dimError.message,
+                    code: 'INVALID_DIMENSIONS'
+                });
+            }
+
+            // Process the image
+            console.log('Processing image with validated options...');
+            const outputBuffer = await ImageService.processImage(req.file.buffer, options);
 
             // Set response headers
+            const mimeType = this.getMimeType(options.format);
+            const extension = this.getExtension(options.format);
+            const filename = `resized-${Date.now()}.${extension}`;
+
+            console.log('Sending response...', {
+                mimeType,
+                filename,
+                size: outputBuffer.length,
+                processingTime: Date.now() - startTime
+            });
+
             res.set({
                 'Content-Type': mimeType,
                 'Content-Disposition': `attachment; filename="${filename}"`,
                 'Content-Length': outputBuffer.length,
-                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
                 'Pragma': 'no-cache',
-                'Expires': '0'
+                'Expires': '0',
+                'X-Processing-Time': `${Date.now() - startTime}ms`,
+                'X-Filename': filename
             });
 
             // Send the processed image
-            console.log('Sending response...');
             res.send(outputBuffer);
-            console.log('Response sent successfully');
 
-        } catch (err) {
-            console.error('Image processing error:', err);
-            const status = err.status || 500;
+        } catch (error) {
+            console.error('Image processing error:', error);
 
-            res.status(status).json({
-                error: err.message || 'Image processing failed',
-                code: err.code || 'INTERNAL_ERROR',
-                timestamp: new Date().toISOString()
-            });
+            const status = error.status || 500;
+            const response = {
+                error: error.message || 'Image processing failed',
+                code: error.code || 'PROCESSING_ERROR',
+                timestamp: new Date().toISOString(),
+                processingTime: `${Date.now() - startTime}ms`
+            };
+
+            if (error.code && error.code.startsWith('ERR_')) {
+                response.code = 'INTERNAL_ERROR';
+            }
+
+            res.status(status).json(response);
         }
     }
 
     getMimeType(format) {
-        const fmt = format.toLowerCase();
-        const mimeMap = {
+        const mimeTypes = {
             'pdf': 'application/pdf',
             'png': 'image/png',
             'webp': 'image/webp',
             'jpeg': 'image/jpeg',
             'jpg': 'image/jpeg'
         };
-        return mimeMap[fmt] || 'image/jpeg';
+
+        return mimeTypes[format] || 'image/jpeg';
+    }
+
+    getExtension(format) {
+        const extensions = {
+            'pdf': 'pdf',
+            'png': 'png',
+            'webp': 'webp',
+            'jpeg': 'jpg',
+            'jpg': 'jpg'
+        };
+
+        return extensions[format] || 'jpg';
     }
 }
 

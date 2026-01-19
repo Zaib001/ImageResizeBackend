@@ -1,4 +1,4 @@
-// app.js
+// src/app.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -8,37 +8,47 @@ const imageRoutes = require('./routes/image.routes');
 
 const app = express();
 
-// Increase payload limit for large images
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// ========== CORS CONFIGURATION ==========
+const allowedOrigins = [
+    'https://image-resize-navy.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000'
+];
 
-// CORS Configuration - SIMPLE for now
+// Apply CORS middleware BEFORE helmet
 app.use(cors({
-    origin: ['https://image-resize-navy.vercel.app', 'http://localhost:5173'],
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Content-Disposition', 'Content-Length']
 }));
 
-// Security Headers
-app.use(helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-    crossOriginEmbedderPolicy: false
-}));
+// Handle preflight requests explicitly
+app.options('*', cors());
 
-// Add CORS headers manually for all responses
+// Custom CORS headers middleware (as fallback)
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const allowedOrigins = ['https://image-resize-navy.vercel.app', 'http://localhost:5173'];
 
     if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Origin', origin);
     }
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
 
-    // Handle preflight requests
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+
+    // Handle preflight
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
@@ -46,71 +56,114 @@ app.use((req, res, next) => {
     next();
 });
 
-// Rate Limiting (more generous for image processing)
+// ========== SECURITY HEADERS ==========
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:"],
+        },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" }
+}));
+
+// ========== BODY PARSING ==========
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ========== RATE LIMITING ==========
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: { error: 'Too many requests, please try again later.' },
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: {
+        error: 'Too many requests from this IP, please try again after 15 minutes'
+    },
     standardHeaders: true,
     legacyHeaders: false,
 });
 
+// Apply rate limiting to API routes only
 app.use('/api', limiter);
 
-// Routes
+// ========== REQUEST LOGGING ==========
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+    next();
+});
+
+// ========== ROUTES ==========
 app.use('/api', imageRoutes);
 
-// Health check endpoint
+// ========== HEALTH CHECK ==========
 app.get('/health', (req, res) => {
     res.status(200).json({
-        status: 'ok',
+        status: 'healthy',
         timestamp: new Date().toISOString(),
-        service: 'Image Resize API'
+        service: 'Image Resize API',
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development'
     });
 });
 
-// Root endpoint
+// ========== ROOT ENDPOINT ==========
 app.get('/', (req, res) => {
     res.json({
-        status: 'online',
-        service: 'Image Resize API',
+        message: 'Image Resize API',
         version: '1.0.0',
         endpoints: {
+            health: 'GET /health',
             process: 'POST /api/process',
-            health: 'GET /health'
+            documentation: 'https://github.com/your-repo/docs'
+        },
+        cors: {
+            allowedOrigins: allowedOrigins
         }
     });
 });
 
-// 404 handler
+// ========== 404 HANDLER ==========
 app.use('*', (req, res) => {
     res.status(404).json({
         error: 'Endpoint not found',
-        path: req.originalUrl
+        path: req.originalUrl,
+        timestamp: new Date().toISOString()
     });
 });
 
-// Global error handler
+// ========== ERROR HANDLER ==========
 app.use((err, req, res, next) => {
-    console.error('Global Error Handler:', err);
+    console.error('ERROR:', {
+        message: err.message,
+        stack: err.stack,
+        url: req.url,
+        method: req.method,
+        timestamp: new Date().toISOString()
+    });
 
     // Set CORS headers even on errors
     const origin = req.headers.origin;
-    const allowedOrigins = ['https://image-resize-navy.vercel.app', 'http://localhost:5173'];
-
     if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Origin', origin);
     }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     const status = err.status || 500;
-    const message = err.message || 'Internal server error';
+    const response = {
+        error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+        timestamp: new Date().toISOString()
+    };
 
-    res.status(status).json({
-        error: message,
-        timestamp: new Date().toISOString(),
-        path: req.originalUrl,
-        ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-    });
+    if (process.env.NODE_ENV !== 'production') {
+        response.stack = err.stack;
+        response.details = err.details || {};
+    }
+
+    res.status(status).json(response);
 });
 
 module.exports = app;

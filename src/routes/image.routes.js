@@ -1,38 +1,50 @@
-// routes/image.routes.js
+// src/routes/image.routes.js
 const express = require('express');
 const multer = require('multer');
 const ImageController = require('../controllers/ImageController');
 
 const router = express.Router();
 
-// Configure multer for memory storage
+// Memory storage for Vercel serverless functions
 const storage = multer.memoryStorage();
 
-// File filter to only accept images
 const fileFilter = (req, file, cb) => {
-    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const allowedMimes = [
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/webp',
+        'image/gif'
+    ];
 
     if (allowedMimes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        cb(new Error('Invalid file type. Only JPG, PNG, and WEBP are allowed.'), false);
+        cb(new Error(`Invalid file type: ${file.mimetype}. Only images are allowed.`));
     }
 };
 
-// Configure upload with limits
 const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
     limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB limit
+        fileSize: 10 * 1024 * 1024 // 10MB limit
     }
 });
 
-// Process image endpoint
-router.post('/process', upload.single('image'), ImageController.process);
-
 // Test endpoint
-router.post('/test', upload.single('image'), (req, res) => {
+router.get('/test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'API is working',
+        timestamp: new Date().toISOString(),
+        cors: 'enabled',
+        origin: req.headers.origin
+    });
+});
+
+// Test upload endpoint
+router.post('/test-upload', upload.single('image'), (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
@@ -40,16 +52,31 @@ router.post('/test', upload.single('image'), (req, res) => {
 
         res.json({
             success: true,
-            message: 'File received successfully',
-            filename: req.file.originalname,
-            size: req.file.size,
-            mimetype: req.file.mimetype,
-            timestamp: new Date().toISOString()
+            message: 'File uploaded successfully',
+            file: {
+                originalname: req.file.originalname,
+                mimetype: req.file.mimetype,
+                size: req.file.size,
+                bufferSize: req.file.buffer.length
+            },
+            cors: {
+                origin: req.headers.origin,
+                allowed: true
+            }
         });
     } catch (error) {
-        console.error('Test endpoint error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('Test upload error:', error);
+        res.status(500).json({
+            error: error.message,
+            cors: {
+                origin: req.headers.origin,
+                allowed: true
+            }
+        });
     }
 });
+
+// Main processing endpoint
+router.post('/process', upload.single('image'), ImageController.process);
 
 module.exports = router;
