@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -57,6 +58,7 @@ app.use((err, req, res, next) => {
 
     res.status(status).json({
         error: message,
+        stack: process.env.NODE_ENV === 'production' ? err.message : err.stack,
         code: err.code || 'INTERNAL_ERROR'
     });
 });
