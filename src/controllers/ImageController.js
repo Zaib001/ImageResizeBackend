@@ -65,7 +65,7 @@ class ImageController {
             }
 
             // Validate mode
-            const validModes = ['stretch', 'fill', 'contain', 'cover', 'color'];
+            const validModes = ['stretch', 'fill', 'contain', 'cover', 'color', 'blur'];
             if (!validModes.includes(options.mode)) {
                 return res.status(400).json({
                     error: `Invalid mode: ${options.mode}. Supported modes: ${validModes.join(', ')}`,

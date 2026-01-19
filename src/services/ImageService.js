@@ -79,13 +79,22 @@ class ImageService {
                         .toBuffer();
                     break;
 
-                case 'color':
-                    processedBuffer = await image
+                case 'blur':
+                    const background = await sharp(inputBuffer)
+                        .resize(finalWidth, finalHeight, { fit: 'cover' })
+                        .blur(20)
+                        .modulate({ brightness: 0.7 })
+                        .toBuffer();
+
+                    const foreground = await sharp(inputBuffer)
                         .resize(finalWidth, finalHeight, {
                             fit: 'contain',
-                            background: backgroundColor
+                            background: { r: 0, g: 0, b: 0, alpha: 0 }
                         })
-                        .flatten({ background: backgroundColor })
+                        .toBuffer();
+
+                    processedBuffer = await sharp(background)
+                        .composite([{ input: foreground }])
                         .toBuffer();
                     break;
 
