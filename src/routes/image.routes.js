@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const ImageController = require('../controllers/ImageController');
-const TempFileManager = require('../utils/TempFileManager');
 
 const storage = multer.memoryStorage();
 

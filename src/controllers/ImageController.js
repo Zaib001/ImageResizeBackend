@@ -1,6 +1,5 @@
 const ImageService = require('../services/ImageService');
 const ValidationService = require('../services/ValidationService');
-const TempFileManager = require('../utils/TempFileManager');
 
 class ImageController {
     async process(req, res) {

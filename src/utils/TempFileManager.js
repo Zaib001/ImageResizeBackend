@@ -1,6 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const os = require('os');
 
 class TempFileManager {
@@ -15,7 +15,7 @@ class TempFileManager {
     }
 
     generatePath(ext = '.tmp') {
-        const id = uuidv4();
+        const id = crypto.randomUUID();
         const filename = `${Date.now()}-${id}${ext}`;
         return path.join(this.baseDir, filename);
     }
