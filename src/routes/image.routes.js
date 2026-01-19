@@ -77,6 +77,6 @@ router.post('/test-upload', upload.single('image'), (req, res) => {
 });
 
 // Main processing endpoint
-router.post('/process', upload.single('image'), ImageController.process);
+router.post('/process', upload.single('image'), (req, res) => ImageController.process(req, res));
 
 module.exports = router;
