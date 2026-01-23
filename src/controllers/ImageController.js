@@ -40,7 +40,11 @@ class ImageController {
                 backgroundColor: req.body.backgroundColor || '#FFFFFF',
                 quality: parseInt(req.body.quality, 10) || 90,
                 maxSizeKB: req.body.maxSizeKB ? parseFloat(req.body.maxSizeKB) : null,
-                isPreview: req.body.isPreview === 'true'
+                isPreview: req.body.isPreview === 'true',
+                resolutionMode: (req.body.resolutionMode || 'auto').toLowerCase(),
+                dpi: parseInt(req.body.dpi, 10) || 96,
+                rotate: parseInt(req.body.rotate, 10) || 0,
+                crop: req.body.crop ? JSON.parse(req.body.crop) : null
             };
 
             console.log('Parsed options:', options);
@@ -90,10 +94,34 @@ class ImageController {
                 });
             }
 
+            // Validate crop
+            if (options.crop) {
+                const { x, y, left, top, width: cw, height: ch } = options.crop;
+                const cropX = left !== undefined ? left : x;
+                const cropY = top !== undefined ? top : y;
+
+                if (typeof cropX !== 'number' || typeof cropY !== 'number' || typeof cw !== 'number' || typeof ch !== 'number') {
+                    return res.status(400).json({
+                        error: 'Invalid crop parameters',
+                        code: 'INVALID_CROP'
+                    });
+                }
+            }
+
+            // Determine DPI for validation
+            let effectiveDpi = 96;
+            if (options.resolutionMode === 'auto') {
+                if (['in', 'cm', 'mm', 'inch', 'centimeter', 'millimeter'].includes(options.unit)) {
+                    effectiveDpi = 300;
+                }
+            } else if (options.resolutionMode === 'fixed') {
+                effectiveDpi = options.dpi;
+            }
+
             // Convert to pixels to check dimensions
             try {
-                const pixelWidth = UnitConverter.toPixels(options.width, options.unit);
-                const pixelHeight = UnitConverter.toPixels(options.height, options.unit);
+                const pixelWidth = UnitConverter.toPixels(options.width, options.unit, effectiveDpi);
+                const pixelHeight = UnitConverter.toPixels(options.height, options.unit, effectiveDpi);
                 UnitConverter.validateDimensions(pixelWidth, pixelHeight);
             } catch (dimError) {
                 return res.status(400).json({

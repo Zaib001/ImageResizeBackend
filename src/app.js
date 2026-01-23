@@ -34,7 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 // Rate Limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 500, // Increased for live preview sensitivity
     message: { error: 'Traffic limit exceeded. Please wait 15 minutes.' }
 });
 

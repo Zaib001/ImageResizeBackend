@@ -14,26 +14,53 @@ class ImageService {
             backgroundColor = '#FFFFFF',
             maxSizeKB = null,
             quality = 90,
-            isPreview = false
+            isPreview = false,
+            resolutionMode = 'auto',
+            dpi = 96,
+            rotate = 0,
+            crop = null
         } = options;
 
         try {
+            console.log('=== IMAGE PROCESSING START ===');
             console.log('Processing image with options:', {
                 width,
                 height,
                 unit,
                 mode,
                 format,
-                isPreview
+                isPreview,
+                resolutionMode,
+                dpi,
+                rotate,
+                crop: crop ? 'YES' : 'NO'
             });
 
-            // Convert units to pixels using your UnitConverter
-            const targetWidth = UnitConverter.toPixels(width, unit);
-            const targetHeight = UnitConverter.toPixels(height, unit);
+            // Get original image metadata
+            const originalMetadata = await sharp(inputBuffer).metadata();
+            console.log('Original image metadata:', {
+                width: originalMetadata.width,
+                height: originalMetadata.height,
+                format: originalMetadata.format
+            });
 
-            console.log(`Converted dimensions: ${width}${unit} x ${height}${unit} -> ${targetWidth}px x ${targetHeight}px`);
+            // Determine effective DPI
+            let effectiveDpi = 96;
+            if (resolutionMode === 'auto') {
+                if (['in', 'cm', 'mm', 'inch', 'centimeter', 'millimeter'].includes(unit.toLowerCase())) {
+                    effectiveDpi = 300;
+                }
+            } else if (resolutionMode === 'fixed') {
+                effectiveDpi = dpi;
+            }
 
-            // Validate dimensions using your UnitConverter
+            // Convert units to pixels using UnitConverter
+            const targetWidth = UnitConverter.toPixels(width, unit, effectiveDpi);
+            const targetHeight = UnitConverter.toPixels(height, unit, effectiveDpi);
+
+            console.log(`Converted dimensions (DPI: ${effectiveDpi}): ${width}${unit} x ${height}${unit} -> ${targetWidth}px x ${targetHeight}px`);
+
+            // Validate dimensions
             UnitConverter.validateDimensions(targetWidth, targetHeight);
 
             // For previews, limit dimensions
@@ -52,9 +79,81 @@ class ImageService {
 
             console.log(`Final dimensions: ${finalWidth}px x ${finalHeight}px`);
 
-            // Process based on mode
+            // Start processing image
+            let image = sharp(inputBuffer);
+
+            // === APPLY ROTATION FIRST ===
+            // This ensures that the crop coordinates match what the user saw on the rotated image
+            if (rotate && rotate !== 0) {
+                console.log(`Applying initial rotation: ${rotate} degrees`);
+                image = image.rotate(rotate);
+
+                // Refresh metadata if we rotated, as dimensions might have swapped
+                const rotatedMetadata = await image.metadata();
+                originalMetadata.width = rotatedMetadata.width;
+                originalMetadata.height = rotatedMetadata.height;
+            }
+
+            // === APPLY CROP ===
+            if (crop && crop.width > 0 && crop.height > 0) {
+                console.log('=== CROP PROCESSING ===');
+
+                let cropObj = crop;
+                if (typeof crop === 'string') {
+                    try {
+                        cropObj = JSON.parse(crop);
+                    } catch (e) {
+                        console.error('Failed to parse crop JSON:', e);
+                    }
+                }
+
+                console.log('Crop parameters:', cropObj);
+
+                let left, top, width_c, height_c;
+
+                // Handle percentage-based cropping
+                if (cropObj.unit === '%' || (cropObj.width <= 100 && cropObj.height <= 100 && !cropObj.left && !cropObj.top)) {
+                    console.log('Detected percentage-based crop coordinates');
+                    left = Math.round((originalMetadata.width * (cropObj.x || cropObj.left || 0)) / 100);
+                    top = Math.round((originalMetadata.height * (cropObj.y || cropObj.top || 0)) / 100);
+                    width_c = Math.round((originalMetadata.width * cropObj.width) / 100);
+                    height_c = Math.round((originalMetadata.height * cropObj.height) / 100);
+                } else {
+                    // Handle pixel-based cropping
+                    left = Math.round(cropObj.left || cropObj.x || 0);
+                    top = Math.round(cropObj.top || cropObj.y || 0);
+                    width_c = Math.round(cropObj.width);
+                    height_c = Math.round(cropObj.height);
+                }
+
+                // Ensure coordinates are within bounds
+                left = Math.max(0, Math.min(left, originalMetadata.width - 1));
+                top = Math.max(0, Math.min(top, originalMetadata.height - 1));
+                width_c = Math.min(width_c, originalMetadata.width - left);
+                height_c = Math.min(height_c, originalMetadata.height - top);
+
+                console.log(`Resolved Absolute Dimensions: left=${left}, top=${top}, width=${width_c}, height=${height_c}`);
+
+                try {
+                    image = image.extract({
+                        left,
+                        top,
+                        width: width_c,
+                        height: height_c
+                    });
+                    console.log('✅ Crop applied successfully');
+                } catch (error) {
+                    console.error('❌ Crop failed:', error);
+                    throw new Error(`Crop failed: ${error.message}`);
+                }
+                console.log('=== END CROP PROCESSING ===');
+            } else {
+                console.log('No crop to apply');
+            }
+
+            // === APPLY RESIZE MODE ===
+            console.log(`Applying final resize mode: ${mode}`);
             let processedBuffer;
-            const image = sharp(inputBuffer);
 
             switch (mode.toLowerCase()) {
                 case 'stretch':
@@ -86,7 +185,7 @@ class ImageService {
                         .modulate({ brightness: 0.7 })
                         .toBuffer();
 
-                    const foregroundBuffer = await sharp(inputBuffer)
+                    const foregroundBuffer = await image
                         .ensureAlpha()
                         .resize(finalWidth, finalHeight, {
                             fit: 'contain',
@@ -101,7 +200,7 @@ class ImageService {
                     break;
 
                 case 'color':
-                    processedBuffer = await sharp(inputBuffer)
+                    processedBuffer = await image
                         .resize(finalWidth, finalHeight, {
                             fit: 'contain',
                             background: backgroundColor
@@ -114,67 +213,137 @@ class ImageService {
                     throw new Error(`Unsupported resize mode: ${mode}`);
             }
 
-            // Handle PDF format
-            if (format.toLowerCase() === 'pdf') {
+            // === CONVERT FORMAT ===
+            if (format.toLowerCase() === 'pdf' && !isPreview) {
                 console.log('Converting to PDF format');
-                return await this.convertToPDF(processedBuffer, finalWidth, finalHeight);
+                const pdfBuffer = await this.convertToPDF(processedBuffer, finalWidth, finalHeight);
+                console.log('=== IMAGE PROCESSING COMPLETE ===');
+                return pdfBuffer;
             }
 
-            // Handle image formats
-            console.log(`Converting to ${format} format [Preview: ${isPreview}]`);
-            const targetQuality = isPreview ? 60 : quality;
+            const outputFormat = isPreview ? 'jpeg' : format;
+            console.log(`Converting to ${outputFormat} format [Preview: ${isPreview}]`);
+
+            const targetQuality = isPreview ? 50 : quality;
             const targetSizeLimit = isPreview ? null : maxSizeKB;
 
-            return await this.convertToFormat(processedBuffer, format, targetQuality, targetSizeLimit);
+            const resultBuffer = await this.convertToFormat(
+                processedBuffer,
+                outputFormat,
+                targetQuality,
+                targetSizeLimit,
+                effectiveDpi
+            );
+
+            console.log(`Final output size: ${Math.round(resultBuffer.length / 1024)} KB`);
+            console.log('=== IMAGE PROCESSING COMPLETE ===');
+            return resultBuffer;
 
         } catch (error) {
-            console.error('ImageService error:', error);
+            console.error('❌ ImageService error:', error);
             throw new Error(`Failed to process image: ${error.message}`);
         }
     }
 
-    async convertToFormat(buffer, format, quality, maxSizeKB) {
+    async convertToFormat(buffer, format, quality, maxSizeKB, dpi = 96) {
         const formatLower = format.toLowerCase();
         const sharpFormat = formatLower === 'jpg' ? 'jpeg' : formatLower;
 
-        console.log(`Format conversion: ${sharpFormat}, quality: ${quality}, maxSizeKB: ${maxSizeKB}`);
+        console.log(`=== FORMAT CONVERSION ===`);
+        console.log(`Target: ${sharpFormat}, quality: ${quality}%, maxSize: ${maxSizeKB}KB, DPI: ${dpi}`);
 
         // If no size limit, just convert
         if (!maxSizeKB) {
             const result = await sharp(buffer)
+                .withMetadata({ density: dpi })
                 .toFormat(sharpFormat, {
                     quality: Math.min(Math.max(quality, 1), 100)
                 })
                 .toBuffer();
-            console.log(`Converted without size limit: ${result.length} bytes`);
+
+            const sizeKB = Math.round(result.length / 1024);
+            console.log(`Converted without size limit: ${sizeKB} KB`);
             return result;
         }
 
-        // With size optimization
         const targetBytes = maxSizeKB * 1024;
+        console.log(`Target size: ${targetBytes} bytes (${maxSizeKB} KB)`);
+
+        // If image is already small enough, return as is
+        const initialSize = buffer.length;
+        if (initialSize <= targetBytes) {
+            console.log(`Image already meets size requirement: ${Math.round(initialSize / 1024)} KB`);
+            return buffer;
+        }
+
+        // Optimize for size
         let currentQuality = Math.min(Math.max(quality, 1), 100);
         let outputBuffer;
         let attempts = 0;
+        const maxAttempts = 15;
 
-        console.log(`Target size: ${targetBytes} bytes, starting quality: ${currentQuality}`);
+        console.log(`Starting size optimization, initial quality: ${currentQuality}%`);
 
-        while (attempts < 5) {
+        while (attempts < maxAttempts) {
             outputBuffer = await sharp(buffer)
-                .toFormat(sharpFormat, { quality: currentQuality })
+                .withMetadata({ density: dpi })
+                .toFormat(sharpFormat, {
+                    quality: currentQuality,
+                    ...(sharpFormat === 'png' ? { compressionLevel: 9 } : {}),
+                    ...(sharpFormat === 'webp' ? { lossless: false } : {})
+                })
                 .toBuffer();
 
-            console.log(`Attempt ${attempts + 1}: quality ${currentQuality}, size ${outputBuffer.length} bytes`);
+            const currentSize = outputBuffer.length;
+            const currentSizeKB = Math.round(currentSize / 1024);
+            console.log(`Attempt ${attempts + 1}: quality ${currentQuality}%, size ${currentSizeKB} KB`);
 
-            if (outputBuffer.length <= targetBytes || currentQuality <= 10) {
-                console.log(`Final quality: ${currentQuality}, final size: ${outputBuffer.length} bytes`);
+            if (currentSize <= targetBytes) {
+                console.log(`✅ Target achieved: ${currentSizeKB} KB at quality ${currentQuality}%`);
                 return outputBuffer;
             }
 
-            currentQuality = Math.max(10, currentQuality - 15);
+            // Calculate how much to reduce quality
+            const oversizeRatio = currentSize / targetBytes;
+            let qualityReduction;
+
+            if (oversizeRatio > 3) {
+                qualityReduction = 40;
+            } else if (oversizeRatio > 2) {
+                qualityReduction = 25;
+            } else if (oversizeRatio > 1.5) {
+                qualityReduction = 15;
+            } else if (oversizeRatio > 1.2) {
+                qualityReduction = 10;
+            } else {
+                qualityReduction = 5;
+            }
+
+            currentQuality = Math.max(1, currentQuality - qualityReduction);
+
+            // If we hit minimum quality, try without metadata
+            if (currentQuality <= 10 && attempts > 5) {
+                console.log('Trying without metadata...');
+                outputBuffer = await sharp(buffer)
+                    .toFormat(sharpFormat, {
+                        quality: 1,
+                        ...(sharpFormat === 'png' ? { compressionLevel: 9 } : {}),
+                        ...(sharpFormat === 'webp' ? { lossless: false } : {})
+                    })
+                    .toBuffer();
+
+                const finalSizeKB = Math.round(outputBuffer.length / 1024);
+                if (outputBuffer.length <= targetBytes) {
+                    console.log(`✅ Achieved with minimum quality: ${finalSizeKB} KB`);
+                    return outputBuffer;
+                }
+                console.log(`Minimum quality still too large: ${finalSizeKB} KB`);
+            }
+
             attempts++;
         }
 
-        console.log(`Using lowest quality (10), size: ${outputBuffer.length} bytes`);
+        console.log(`Max attempts reached. Returning best effort: ${Math.round(outputBuffer.length / 1024)} KB`);
         return outputBuffer;
     }
 
@@ -187,7 +356,7 @@ class ImageService {
                 .jpeg({ quality: 90 })
                 .toBuffer();
 
-            console.log(`JPEG for PDF: ${jpegBuffer.length} bytes`);
+            console.log(`JPEG for PDF: ${Math.round(jpegBuffer.length / 1024)} KB`);
 
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage([width, height]);
@@ -203,7 +372,7 @@ class ImageService {
             const pdfBytes = await pdfDoc.save();
             const pdfBuffer = Buffer.from(pdfBytes);
 
-            console.log(`PDF created: ${pdfBuffer.length} bytes`);
+            console.log(`PDF created: ${Math.round(pdfBuffer.length / 1024)} KB`);
             return pdfBuffer;
         } catch (error) {
             console.error('PDF conversion error:', error);

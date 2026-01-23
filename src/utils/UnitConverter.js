@@ -3,7 +3,7 @@ class UnitConverter {
         this.DPI = 96;
     }
 
-    toPixels(value, unit) {
+    toPixels(value, unit, dpi = 96) {
         if (value <= 0) return 0;
 
         switch (unit.toLowerCase()) {
@@ -14,15 +14,15 @@ class UnitConverter {
             case 'in':
             case 'inch':
             case 'inches':
-                return Math.round(value * this.DPI);
+                return Math.round(value * dpi);
             case 'cm':
             case 'centimeter':
             case 'centimeters':
-                return Math.round((value / 2.54) * this.DPI);
+                return Math.round((value / 2.54) * dpi);
             case 'mm':
             case 'millimeter':
             case 'millimeters':
-                return Math.round((value / 25.4) * this.DPI);
+                return Math.round((value / 25.4) * dpi);
             default:
                 throw new Error(`Unsupported unit: ${unit}`);
         }
