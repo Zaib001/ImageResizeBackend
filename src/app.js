@@ -16,6 +16,7 @@ app.use(helmet({
 const allowedOrigins = [
     'https://image-resize-navy.vercel.app',
     'https://imageresize-1-ikct.onrender.com',
+    "https://image-resize-eta.vercel.app",
     'http://localhost:5173',
     'http://localhost:4173',
     'http://localhost:3000'
