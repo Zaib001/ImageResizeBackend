@@ -4,15 +4,19 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const imageRoutes = require('./routes/image.routes');
+const adminRoutes = require('./routes/admin.routes');
+const blogRoutes = require('./routes/blog.routes');
+const networkRoutes = require('./routes/network.routes');
+const connectDB = require('./config/database');
 
 const app = express();
 
-// Security Headers
+connectDB();
+
 app.use(helmet({
-    crossOriginResourcePolicy: false, // Required for cross-origin image blobs
+    crossOriginResourcePolicy: false,
 }));
 
-// CORS Configuration
 const allowedOrigins = [
     'https://image-resize-navy.vercel.app',
     'https://imageresize-1-ikct.onrender.com',
@@ -24,7 +28,7 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: allowedOrigins,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     credentials: true,
     exposedHeaders: ['Content-Disposition']
 }));
@@ -32,14 +36,16 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rate Limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 500, // Increased for live preview sensitivity
+    max: 500,
     message: { error: 'Traffic limit exceeded. Please wait 15 minutes.' }
 });
 
 app.use('/api', limiter, imageRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/blogs', blogRoutes);
+app.use('/api/network', networkRoutes);
 
 app.get('/', (req, res) => {
     res.json({
@@ -53,7 +59,6 @@ app.use((err, req, res, next) => {
     const status = err.status || 500;
     const message = err.message || 'Engine Processing Error';
 
-    // Log only in dev
     if (process.env.NODE_ENV !== 'production') {
         console.error(`[Error ${status}]: ${message}`);
     }
